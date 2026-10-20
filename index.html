@@ -35,7 +35,7 @@
   // Debe coincidir EXACTAMENTE con MQTT_TOPIC del archivo ESP32CAM_MQTT_VOZ.ino
   const MQTT_HOST = 'test.mosquitto.org';
   const MQTT_PORT = 8081;
-  const MQTT_TOPIC = 'prueba/jose/esp32cam/led/9f98a1';
+  const MQTT_TOPIC = 'prueba/jose/esp32cam/led/cambia-esta-cadena-7f31a9';
 
   const status = document.getElementById('status');
   const heard = document.getElementById('heard');
@@ -87,7 +87,7 @@
     voiceButton.textContent = 'Voz no compatible con este navegador';
   } else {
     const recognition = new SpeechRecognition();
-    recognition.lang = 'es-PE';
+    recognition.lang = 'es-ES'; // Alternativa normalmente más compatible que es-PE
     recognition.continuous = false;
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
@@ -118,7 +118,15 @@
       }
     };
     recognition.onerror = event => {
-      heard.textContent = 'Error de voz: ' + event.error + '. Revisa permisos del micrófono y conexión.';
+      const messages = {
+        'network': 'Error de voz: network. Chrome no pudo conectar con su servicio de reconocimiento de voz. No suele ser un permiso del micrófono. Prueba de nuevo con Internet, sin VPN/proxy, y recarga la página. Si continúa, el servicio de voz del navegador puede no estar disponible.',
+        'not-allowed': 'Micrófono bloqueado. En Chrome, pulsa el candado junto a la dirección > Configuración del sitio > Micrófono > Permitir.',
+        'no-speech': 'No detecté voz. Pulsa el botón y habla cerca del micrófono.',
+        'audio-capture': 'No encuentro un micrófono disponible. Revisa el micrófono seleccionado en Windows y Chrome.',
+        'service-not-allowed': 'El navegador o su servicio de voz no permite reconocimiento. Prueba Chrome actualizado desde la página HTTPS.',
+        'aborted': 'Reconocimiento cancelado. Pulsa el botón para volver a intentarlo.'
+      };
+      heard.textContent = messages[event.error] || ('Error de voz: ' + event.error + '.');
     };
     recognition.onend = () => { voiceButton.disabled = !client.connected; };
   }
