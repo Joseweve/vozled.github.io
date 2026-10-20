@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#172554">
+  <title>Domótica ESP32-CAM por voz</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 18px; font-family: system-ui, Arial, sans-serif; background: #eaf0f8; color: #172033; }
+    main { width: min(100%, 460px); background: white; padding: 25px; border-radius: 20px; box-shadow: 0 12px 36px #10204020; text-align: center; }
+    h1 { margin-top: 0; font-size: 1.6rem; }
+    .status, .heard { border-radius: 10px; background: #f1f5f9; padding: 12px; overflow-wrap: anywhere; }
+    button { width: 100%; padding: 15px; border: 0; border-radius: 12px; margin-top: 12px; font-size: 1.02rem; font-weight: 700; color: white; cursor: pointer; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    #on { background: #15803d; } #off { background: #b91c1c; } #voice { background: #1d4ed8; }
+    small { display: block; color: #5b6474; line-height: 1.5; margin-top: 16px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Mi domótica</h1>
+  <p>Control remoto por botones o voz</p>
+  <p id="status" class="status" role="status">Conectando al broker MQTT…</p>
+  <button id="on" disabled>Encender LED</button>
+  <button id="off" disabled>Apagar LED</button>
+  <button id="voice" disabled>🎙️ Hablar: encender o apagar LED</button>
+  <p><strong>Reconocido:</strong></p>
+  <p id="heard" class="heard">Todavía no has hablado.</p>
+  <small>Permite el acceso al micrófono cuando el navegador lo solicite. Di, por ejemplo, «enciende el LED» o «apaga el LED». La función de voz depende del navegador y normalmente requiere HTTPS. Demo con broker MQTT público: no la uses para puertas, bombas ni equipos peligrosos.</small>
+</main>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<script>
+(() => {
+  // Debe coincidir EXACTAMENTE con MQTT_TOPIC del archivo ESP32CAM_MQTT_VOZ.ino
+  const MQTT_HOST = 'test.mosquitto.org';
+  const MQTT_PORT = 8081;
+  const MQTT_TOPIC = 'prueba/jose/esp32cam/led/9f98a1';
+
+  const status = document.getElementById('status');
+  const heard = document.getElementById('heard');
+  const onButton = document.getElementById('on');
+  const offButton = document.getElementById('off');
+  const voiceButton = document.getElementById('voice');
+  const buttons = [onButton, offButton, voiceButton];
+  const setButtons = enabled => buttons.forEach(button => button.disabled = !enabled);
+
+  if (!window.mqtt) {
+    status.textContent = 'No se pudo cargar MQTT. Revisa la conexión a Internet.';
+    return;
+  }
+
+  const client = mqtt.connect(`wss://${MQTT_HOST}:${MQTT_PORT}/mqtt`, {
+    clientId: 'web_' + Math.random().toString(16).slice(2, 12),
+    clean: true,
+    connectTimeout: 10000,
+    reconnectPeriod: 3000
+  });
+
+  client.on('connect', () => {
+    status.textContent = 'Conectado al broker de pruebas. Ya puedes enviar órdenes.';
+    setButtons(true);
+  });
+  client.on('reconnect', () => { status.textContent = 'Reconectando…'; setButtons(false); });
+  client.on('offline', () => { status.textContent = 'Sin conexión con el broker.'; setButtons(false); });
+  client.on('error', error => { status.textContent = 'Error MQTT: ' + error.message; setButtons(false); });
+  client.on('close', () => setButtons(false));
+
+  function send(value) {
+    if (!client.connected) {
+      status.textContent = 'No hay conexión MQTT.';
+      return;
+    }
+    client.publish(MQTT_TOPIC, value, { qos: 0, retain: false }, error => {
+      if (error) status.textContent = 'No se pudo enviar la orden.';
+      else status.textContent = 'Orden enviada: ' + value + '. Verifica el LED.';
+    });
+  }
+
+  onButton.addEventListener('click', () => send('ON'));
+  offButton.addEventListener('click', () => send('OFF'));
+
+  // API de reconocimiento de voz del navegador (no del ESP32).
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    voiceButton.disabled = true;
+    voiceButton.textContent = 'Voz no compatible con este navegador';
+  } else {
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'es-PE';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    voiceButton.addEventListener('click', () => {
+      if (!client.connected) {
+        status.textContent = 'Primero espera a que MQTT se conecte.';
+        return;
+      }
+      heard.textContent = 'Escuchando… di «enciende el LED» o «apaga el LED». ';
+      voiceButton.disabled = true;
+      try { recognition.start(); }
+      catch (error) {
+        voiceButton.disabled = false;
+        heard.textContent = 'No se pudo iniciar el micrófono. Inténtalo otra vez.';
+      }
+    });
+
+    recognition.onresult = event => {
+      const phrase = event.results[0][0].transcript.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      heard.textContent = '«' + event.results[0][0].transcript + '»';
+      if (/\b(apaga|apagar|apague|desactiva|desactivar|off)\b/.test(phrase)) {
+        send('OFF');
+      } else if (/\b(enciende|encender|prende|prender|activa|activar|on)\b/.test(phrase)) {
+        send('ON');
+      } else {
+        status.textContent = 'No reconocí una orden. Di «enciende el LED» o «apaga el LED». ';
+      }
+    };
+    recognition.onerror = event => {
+      heard.textContent = 'Error de voz: ' + event.error + '. Revisa permisos del micrófono y conexión.';
+    };
+    recognition.onend = () => { voiceButton.disabled = !client.connected; };
+  }
+})();
+</script>
+</body>
+</html>
